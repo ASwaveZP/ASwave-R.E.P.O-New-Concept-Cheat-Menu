@@ -2897,6 +2897,7 @@ public static class LocalPlayerManager
 		ConfigData.SkillSettings s = ConfigManager.Config.Skills;
 		ApplySkillDelta(steamID, "Stamina", s.Stamina, StatsManager.instance.playerUpgradeStamina);
 		ApplySkillDelta(steamID, "Health", s.Health, StatsManager.instance.playerUpgradeHealth);
+		ApplySkillDelta(steamID, "ExtraJump", s.ExtraJump, StatsManager.instance.playerUpgradeExtraJump);
 		ApplySkillDelta(steamID, "TumbleWings", s.TumbleWings, StatsManager.instance.playerUpgradeTumbleWings);
 		ApplySkillDelta(steamID, "CrouchRest", s.CrouchRest, StatsManager.instance.playerUpgradeCrouchRest);
 		ApplySkillDelta(steamID, "DeathHeadBattery", s.DeathHeadBattery, StatsManager.instance.playerUpgradeDeathHeadBattery);
@@ -2918,6 +2919,7 @@ public static class LocalPlayerManager
 		{
 			case "Stamina": PunManager.instance.UpgradePlayerEnergy(steamID, delta); break;
 			case "Health": PunManager.instance.UpgradePlayerHealth(steamID, delta); break;
+			case "ExtraJump": PunManager.instance.UpgradePlayerExtraJump(steamID, delta); break;
 			case "TumbleWings": PunManager.instance.UpgradePlayerTumbleWings(steamID, delta); break;
 			case "CrouchRest": PunManager.instance.UpgradePlayerCrouchRest(steamID, delta); break;
 			case "DeathHeadBattery": PunManager.instance.UpgradeDeathHeadBattery(steamID, delta); break;

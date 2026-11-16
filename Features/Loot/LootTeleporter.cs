@@ -14,9 +14,36 @@ public static class LootTeleporter
 {
 	public static string LastStatus { get; private set; } = "可将当前地图中的松散物品批量传送到玩家附近。";
 
+	public enum BatchDestination
+	{
+		Front,
+		Cart,
+		Extraction
+	}
+
 	private const float ValuableProtectionSeconds = 3.0f;
 	private static bool _physicalPullRoutineActive;
+	private static bool _cancelPullRequested;
 	private static readonly MethodInfo ForceGrabMethod = typeof(PhysGrabber).GetMethod("ForceGrabPhysObject", BindingFlags.Instance | BindingFlags.NonPublic);
+
+	public static bool IsPulling => _physicalPullRoutineActive;
+	public static bool FilterValuables = true;
+	public static bool FilterBeads = false;
+	public static bool FilterWeapons = false;
+	public static bool FilterUpgrades = false;
+	public static bool FilterHealthPacks = false;
+	public static bool FilterBatteries = false;
+	public static bool FilterMoneyBags = false;
+	public static bool ExcludeSecuredItems = true;
+
+	public static void CancelPull()
+	{
+		if (_physicalPullRoutineActive)
+		{
+			_cancelPullRequested = true;
+			LastStatus = "正在取消批量传送…";
+		}
+	}
 
 	public static int TeleportValuablesToPlayer()
 	{
@@ -160,7 +187,8 @@ public static class LootTeleporter
 
 		float reach = Mathf.Clamp(NativeTeleportModule.Settings.MaxDistance + 5f, 15f, 10000f);
 		_physicalPullRoutineActive = true;
-		LocalPlayerManager.SetTemporaryGrabOverrides(5f, reach);
+		_cancelPullRequested = false;
+		LocalPlayerManager.SetTemporaryGrabOverrides(25f, reach);
 		player.StartCoroutine(PullObjectsRoutine(objects, playerTransform, grabber, teleportDoors, reach));
 		LastStatus = teleportDoors
 			? $"正在移动 {objects.Count} 扇门，抓取力量已提高；部分门可能会断开。"
@@ -177,6 +205,10 @@ public static class LootTeleporter
 		{
 			for (int i = 0; i < objects.Count; i++)
 			{
+				if (_cancelPullRequested)
+				{
+					break;
+				}
 				PhysGrabObject item = objects[i];
 				if (item == null || playerTransform == null || grabber == null || !item.gameObject.activeInHierarchy)
 				{
@@ -206,18 +238,14 @@ public static class LootTeleporter
 				}
 
 				float grabWait = 0f;
-				while (grabWait < 1.5f && grabber != null && !grabber.grabbed)
+				while (grabWait < 1.5f && !_cancelPullRequested && grabber != null && !grabber.grabbed)
 				{
 					grabber.OverrideGrabDistance(initialDistance + 1f);
 					grabber.OverrideGrab(item, 0.5f, false);
-					// OverrideGrab normally waits for PhysGrabber's next Update tick.
-					// Invoke the game's own grab routine too, so menu/input timing
-					// cannot prevent the local player grab from starting.
 					TryStartNativeGrab(grabber, item);
 					grabWait += Time.deltaTime;
 					yield return null;
 				}
-				// Give the game's grab-link RPC one more frame to populate the target.
 				for (int frame = 0; frame < 3 && grabber != null && grabber.grabbed; frame++)
 					yield return null;
 
@@ -231,16 +259,34 @@ public static class LootTeleporter
 				}
 
 				float elapsed = 0f;
-				float pullTimeout = Mathf.Clamp(initialDistance / 2.5f + (teleportDoors ? 12f : 8f), 12f, 180f);
+				float pullTimeout = Mathf.Clamp(initialDistance / 3.5f + (teleportDoors ? 8f : 5f), 6f, 45f);
+				float bestDist = initialDistance;
+				float stallTimer = 0f;
 				bool hingeBroken = false;
-				while (elapsed < pullTimeout && item != null && playerTransform != null &&
+				while (elapsed < pullTimeout && !_cancelPullRequested && item != null && playerTransform != null &&
 					ReflectionUtils.GetFieldValue<PhysGrabObject>(grabber, "grabbedPhysGrabObject") == item)
 				{
+					// Refresh OverrideGrab every frame so its 0.5s timer does not expire mid-pull.
+					grabber.OverrideGrab(item, 0.5f, false);
 					grabber.OverrideGrabDistance(1.5f);
 					if (hinge != null && ReflectionUtils.GetFieldValue<bool>(hinge, "broken"))
 						hingeBroken = true;
-					if (Vector3.Distance(item.transform.position, playerTransform.position) <= 3.5f)
+
+					float curDist = Vector3.Distance(item.transform.position, playerTransform.position);
+					if (curDist <= 3.5f)
 						break;
+					if (curDist < bestDist - 0.15f)
+					{
+						bestDist = curDist;
+						stallTimer = 0f;
+					}
+					else
+					{
+						stallTimer += Time.deltaTime;
+						if (stallTimer >= 2.2f)
+							break;
+					}
+
 					elapsed += Time.deltaTime;
 					yield return null;
 				}
@@ -251,6 +297,8 @@ public static class LootTeleporter
 				int viewId = item != null && item.GetComponent<PhotonView>() != null ? item.GetComponent<PhotonView>().ViewID : -1;
 				if (grabber != null && grabber.grabbed && viewId > 0)
 					grabber.ReleaseObject(viewId, 0.1f);
+				if (grabber != null)
+					grabber.OverrideGrab(null, 0f, false);
 
 				if (hinge != null && ReflectionUtils.GetFieldValue<bool>(hinge, "broken"))
 					hingeBroken = true;
@@ -274,8 +322,11 @@ public static class LootTeleporter
 				if (currentView != null)
 					grabber.ReleaseObject(currentView.ViewID, 0.1f);
 			}
+			if (grabber != null)
+				grabber.OverrideGrab(null, 0f, false);
 			LocalPlayerManager.SetTemporaryGrabOverrides(1f, 0f);
 			_physicalPullRoutineActive = false;
+			_cancelPullRequested = false;
 			LastStatus = teleportDoors
 				? $"门移动完成：移动 {moved} 扇，断开 {broken} 扇，未移动 {failed} 扇。"
 				: $"物品移动完成：移动 {moved} 件，未移动 {failed} 件。";
@@ -749,5 +800,171 @@ public static class LootTeleporter
 		LocalPlayerManager.DebugReport("C", "LootTeleporter.TeleportObject", "执行物体传送后", "item=" + ((Object)(object)physGrabObject).name + ",transform=" + ((Component)physGrabObject).transform.position + ",rb=" + (((Object)(object)physGrabObject.rb != (Object)null) ? physGrabObject.rb.position.ToString() : "null") + ",targetPosField=" + ReflectionUtils.GetFieldValue<Vector3>(physGrabObject, "targetPos") + ",currentPosField=" + ReflectionUtils.GetFieldValue<Vector3>(physGrabObject, "currentPosition"));
 		#endregion
 		return true;
+	}
+
+	public static List<ExtractionPoint> GetSortedExtractionPoints()
+	{
+		List<ExtractionPoint> result = new List<ExtractionPoint>();
+		ExtractionPoint[] points = Object.FindObjectsOfType<ExtractionPoint>();
+		if (points == null || points.Length == 0)
+		{
+			return result;
+		}
+
+		for (int i = 0; i < points.Length; i++)
+		{
+			ExtractionPoint ep = points[i];
+			if (ep == null || ReflectionUtils.GetFieldValue<bool>(ep, "isShop"))
+			{
+				continue;
+			}
+			result.Add(ep);
+		}
+
+		Vector3 truckPos = Vector3.zero;
+		if ((Object)(object)TruckSafetySpawnPoint.instance != (Object)null)
+		{
+			truckPos = ((Component)TruckSafetySpawnPoint.instance).transform.position;
+		}
+		if (truckPos != Vector3.zero)
+		{
+			result.Sort((a, b) => Vector3.Distance(((Component)a).transform.position, truckPos)
+				.CompareTo(Vector3.Distance(((Component)b).transform.position, truckPos)));
+		}
+		return result;
+	}
+
+	public static int TeleportFilteredItems(BatchDestination destination)
+	{
+		if (!NativeTeleportModule.TryBeginAction(TeleportAction.Valuables))
+		{
+			LastStatus = NativeTeleportModule.LastStatus;
+			return 0;
+		}
+
+		if (!TryGetLooseObjects(out List<PhysGrabObject> sourceObjects, out Transform playerTransform))
+		{
+			return 0;
+		}
+
+		PlayerAvatar sourcePlayerAvatar = PlayerAvatar.instance;
+		List<PhysGrabObject> candidates = new List<PhysGrabObject>();
+		for (int i = 0; i < sourceObjects.Count; i++)
+		{
+			PhysGrabObject obj = sourceObjects[i];
+			if (MatchesFilteredCategory(obj, sourcePlayerAvatar))
+			{
+				candidates.Add(obj);
+			}
+		}
+
+		if (candidates.Count == 0)
+		{
+			LastStatus = "当前筛选分类下没有可传送的物品。";
+			return 0;
+		}
+
+		if (destination == BatchDestination.Front && GameManager.Multiplayer() && !SemiFunc.IsMasterClientOrSingleplayer())
+		{
+			return StartPhysicalPull(candidates, playerTransform, teleportDoors: false);
+		}
+
+		Vector3 targetCenter;
+		if (destination == BatchDestination.Cart)
+		{
+			PhysGrabCart nearestCart = FindNearestCart(playerTransform.position);
+			if ((Object)(object)nearestCart == (Object)null)
+			{
+				LastStatus = "当前地图未找到小推车。";
+				return 0;
+			}
+			targetCenter = ((Component)nearestCart).transform.position + Vector3.up * 0.45f;
+		}
+		else if (destination == BatchDestination.Extraction)
+		{
+			List<ExtractionPoint> eps = GetSortedExtractionPoints();
+			if (eps.Count == 0)
+			{
+				LastStatus = "当前地图未找到可用提取点。";
+				return 0;
+			}
+			targetCenter = ((Component)eps[0]).transform.position + Vector3.up * 0.5f;
+		}
+		else
+		{
+			targetCenter = ResolvePointerGroundTarget(playerTransform);
+		}
+
+		if (GameManager.Multiplayer() && !SemiFunc.IsMasterClientOrSingleplayer())
+		{
+			LastStatus = "非主机仅支持将物品牵引到自己身边；请使用「传送到面前」。";
+			return 0;
+		}
+
+		int moved = 0;
+		for (int i = 0; i < candidates.Count; i++)
+		{
+			Vector3 pos = ResolvePlacementPoint(targetCenter, playerTransform, i, candidates[i]);
+			if (TeleportObject(candidates[i], pos, ValuableProtectionSeconds))
+			{
+				moved++;
+			}
+		}
+
+		LastStatus = $"已批量传送 {moved} 件物品。";
+		return moved;
+	}
+
+	private static PhysGrabCart FindNearestCart(Vector3 origin)
+	{
+		PhysGrabCart[] carts = Object.FindObjectsOfType<PhysGrabCart>();
+		PhysGrabCart best = null;
+		float bestDist = float.MaxValue;
+		for (int i = 0; i < carts.Length; i++)
+		{
+			if ((Object)(object)carts[i] == (Object)null) continue;
+			float d = Vector3.Distance(origin, ((Component)carts[i]).transform.position);
+			if (d < bestDist)
+			{
+				bestDist = d;
+				best = carts[i];
+			}
+		}
+		return best;
+	}
+
+	private static bool MatchesFilteredCategory(PhysGrabObject obj, PlayerAvatar sourcePlayerAvatar)
+	{
+		if ((Object)(object)obj == (Object)null || HasDoorHinge(obj) || !IsCommonTeleportCandidate(obj, sourcePlayerAvatar))
+		{
+			return false;
+		}
+
+		if (ExcludeSecuredItems)
+		{
+			RoomVolumeCheck room = ((Component)obj).GetComponentInChildren<RoomVolumeCheck>(true);
+			if ((Object)(object)room != (Object)null &&
+				(ReflectionUtils.GetFieldValue<bool>(room, "inTruck") || ReflectionUtils.GetFieldValue<bool>(room, "inExtractionPoint")))
+			{
+				return false;
+			}
+		}
+
+		string lowerName = (((Object)obj).name ?? string.Empty).ToLowerInvariant();
+		ValuableObject valuable = ((Component)obj).GetComponent<ValuableObject>();
+		if ((Object)(object)valuable != (Object)null)
+		{
+			bool isBead = lowerName.Contains("bead") || lowerName.Contains("pearl") || lowerName.Contains("orb") || lowerName.Contains("gem") || lowerName.Contains("crystal");
+			bool isMoney = lowerName.Contains("money") || lowerName.Contains("bag") || lowerName.Contains("cash");
+			if (FilterBeads && isBead) return true;
+			if (FilterMoneyBags && isMoney) return true;
+			return FilterValuables && !isBead && !isMoney;
+		}
+
+		if (FilterUpgrades && lowerName.Contains("upgrade")) return true;
+		if (FilterHealthPacks && (lowerName.Contains("health") || lowerName.Contains("heal") || lowerName.Contains("med"))) return true;
+		if (FilterBatteries && (lowerName.Contains("battery") || lowerName.Contains("charge"))) return true;
+		if (FilterWeapons && (((Component)obj).GetComponent<ItemEquippable>() != (Object)null || lowerName.Contains("gun") || lowerName.Contains("weapon") || lowerName.Contains("bat") || lowerName.Contains("sword"))) return true;
+		return false;
 	}
 }

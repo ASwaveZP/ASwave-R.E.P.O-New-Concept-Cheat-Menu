@@ -497,6 +497,7 @@ public class ConfigData
 	{
 		public int Stamina = 0;
 		public int Health = 0;
+		public int ExtraJump = 0;
 		public int TumbleWings = 0;
 		public int CrouchRest = 0;
 		public int DeathHeadBattery = 0;

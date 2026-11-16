@@ -1,4 +1,4 @@
-﻿namespace SharpMonoInjector
+namespace SharpMonoInjector
 {
     public enum MonoImageOpenStatus
     {

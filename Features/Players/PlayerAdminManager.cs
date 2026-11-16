@@ -29,6 +29,37 @@ namespace Cheat.Features.Players
         {
             private Coroutine _healthSharingRoutine;
 
+            private static string ResolveHealDroneResourcePath()
+            {
+                try
+                {
+                    Item[] loadedItems = Resources.FindObjectsOfTypeAll<Item>();
+                    for (int i = 0; i < loadedItems.Length; i++)
+                    {
+                        Item item = loadedItems[i];
+                        if (item == null || item.disabled || item.prefab == null || !item.prefab.IsValid())
+                        {
+                            continue;
+                        }
+
+                        string path = item.prefab.ResourcePath;
+                        string label = item.itemName ?? item.name ?? path ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(path)) continue;
+                        bool isHealDrone = (label.IndexOf("Drone", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                                            label.IndexOf("Heal", StringComparison.OrdinalIgnoreCase) >= 0) ||
+                                           (path.IndexOf("Drone", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                                            path.IndexOf("Heal", StringComparison.OrdinalIgnoreCase) >= 0);
+                        if (isHealDrone && Resources.Load<GameObject>(path) != null)
+                        {
+                            return path;
+                        }
+                    }
+                }
+                catch { }
+
+                return "Items/Item Drone Heal";
+            }
+
             public bool BeginHealthSharing(List<PlayerAvatar> targets)
             {
                 PlayerAvatar donor = GetComponent<PlayerAvatar>();
@@ -43,108 +74,277 @@ namespace Cheat.Features.Players
                     return false;
                 }
 
-                LocalPlayerManager.SetTemporaryHealthLock(true);
-                if (!ReflectionUtils.GetFieldValue<bool>(donor.playerHealth, "godMode"))
+                // Shop & Arena disable PlayerHealthGrab; use ItemDroneHeal there (works on MasterClient & heals target via their own client).
+                if (SemiFunc.RunIsShop() || SemiFunc.RunIsArena() || ResolveCurrentHealth(donor.playerHealth) <= 10)
                 {
-                    LocalPlayerManager.SetTemporaryHealthLock(false);
-                    return false;
+                    _healthSharingRoutine = StartCoroutine(HealWithDroneRoutine(donor, targets));
+                    return true;
                 }
 
-                _healthSharingRoutine = StartCoroutine(ShareHealthRoutine(donor, targets));
+                LocalPlayerManager.SetTemporaryHealthLock(true);
+                ReflectionUtils.SetFieldValue(donor.playerHealth, "godMode", true);
+
+                List<PlayerAvatar> activePatients = new List<PlayerAvatar>();
+                List<StaticGrabObject> activeGrabs = new List<StaticGrabObject>();
+                List<int> initialHealths = new List<int>();
+                int skipped = 0;
+
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    PlayerAvatar patient = targets[i];
+                    if (patient == null || patient == donor || IsPlayerDead(patient) || patient.playerHealth == null)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    int cur = ResolveCurrentHealth(patient.playerHealth);
+                    int max = ResolveMaxHealth(patient.playerHealth);
+                    if (cur >= max)
+                    {
+                        continue;
+                    }
+
+                    PlayerHealthGrab healthGrab = patient.healthGrab;
+                    StaticGrabObject staticGrab = healthGrab != null
+                        ? ReflectionUtils.GetFieldValue<StaticGrabObject>(healthGrab, "staticGrabObject")
+                        : null;
+                    if (staticGrab == null || !staticGrab.enabled || staticGrab.dead ||
+                        staticGrab.GetComponent<PhotonView>() == null)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    if (staticGrab.grabbed)
+                    {
+                        staticGrab.grabbed = false;
+                    }
+
+                    staticGrab.GrabStarted(donor.physGrabber);
+                    activePatients.Add(patient);
+                    activeGrabs.Add(staticGrab);
+                    initialHealths.Add(cur);
+                }
+
+                if (activePatients.Count == 0)
+                {
+                    LocalPlayerManager.SetTemporaryHealthLock(false);
+                    _healthSharingRoutine = StartCoroutine(HealWithDroneRoutine(donor, targets));
+                    return true;
+                }
+
+                _healthSharingRoutine = StartCoroutine(ShareHealthRoutine(donor, activePatients, activeGrabs, initialHealths, skipped));
                 return true;
             }
 
-            private IEnumerator ShareHealthRoutine(PlayerAvatar donor, List<PlayerAvatar> targets)
+            private IEnumerator HealWithDroneRoutine(PlayerAvatar donor, List<PlayerAvatar> targets)
             {
-                int patientsVisited = 0;
-                int observedTransferred = 0;
-                int skipped = 0;
+                string dronePath = ResolveHealDroneResourcePath();
+                List<GameObject> spawnedDrones = new List<GameObject>();
+                List<PlayerAvatar> patients = new List<PlayerAvatar>();
+                List<int> initialHealths = new List<int>();
+
                 try
                 {
                     for (int i = 0; i < targets.Count; i++)
                     {
                         PlayerAvatar patient = targets[i];
-                        if (donor == null || patient == null || patient == donor || IsPlayerDead(patient) ||
-                            donor.playerHealth == null || patient.playerHealth == null || ResolveCurrentHealth(donor.playerHealth) <= 10)
-                        {
-                            skipped++;
-                            continue;
-                        }
-
-                        PlayerHealthGrab healthGrab = patient.healthGrab;
-                        if (healthGrab == null)
-                        {
-                            skipped++;
-                            continue;
-                        }
-
-                        StaticGrabObject staticGrab = ReflectionUtils.GetFieldValue<StaticGrabObject>(healthGrab, "staticGrabObject");
-                        if (healthGrab == null || staticGrab == null || !staticGrab.enabled || staticGrab.dead ||
-                            staticGrab.grabbed || staticGrab.GetComponent<PhotonView>() == null)
-                        {
-                            skipped++;
-                            continue;
-                        }
-
-                        int initialPatientHealth = ResolveCurrentHealth(patient.playerHealth);
-                        int initialMaxHealth = ResolveMaxHealth(patient.playerHealth);
-                        if (initialPatientHealth >= initialMaxHealth)
+                        if (patient == null || patient == donor || IsPlayerDead(patient) ||
+                            patient.playerHealth == null || patient.photonView == null || patient.photonView.ViewID == 0)
                         {
                             continue;
                         }
 
-                        bool started = false;
+                        int cur = ResolveCurrentHealth(patient.playerHealth);
+                        int max = ResolveMaxHealth(patient.playerHealth);
+                        if (cur >= max)
+                        {
+                            continue;
+                        }
+
+                        Vector3 spawnPos = patient.PlayerVisionTarget != null && patient.PlayerVisionTarget.VisionTransform != null
+                            ? patient.PlayerVisionTarget.VisionTransform.position
+                            : patient.transform.position + Vector3.up * 0.8f;
+
+                        GameObject droneObj = null;
                         try
                         {
-                            // This is the game's normal health-bar grab path.
-                            // GrabStarted forwards the locally-owned PhysGrabber
-                            // to the master, where PlayerHealthGrab performs the
-                            // vanilla donor/recipient health transfer.
-                            staticGrab.GrabStarted(donor.physGrabber);
-                            started = true;
-
-                            // The native interaction transfers up to 10 HP per
-                            // second, and refuses to drain a donor below 10 HP.
-                            // Wait for synced health to reach the recipient or
-                            // for the donor's available health to run out.
-                            // The native health-grab interaction is capped at
-                            // 10 HP/second by PlayerHealthGrab.Update. Keep one
-                            // click active for the full missing amount rather
-                            // than stopping after the old fixed 12-second cap.
-                            float missingHealth = Mathf.Max(0, initialMaxHealth - initialPatientHealth);
-                            float timeout = Mathf.Clamp(missingHealth / 8f + 4f, 12f, 300f);
-                            while (timeout > 0f && patient != null && donor != null &&
-                                   patient.playerHealth != null && donor.playerHealth != null &&
-                                   ResolveCurrentHealth(patient.playerHealth) < ResolveMaxHealth(patient.playerHealth) &&
-                                   ResolveCurrentHealth(donor.playerHealth) > 10)
-                            {
-                                yield return new WaitForSeconds(1.05f);
-                                timeout -= 1.05f;
-                            }
+                            droneObj = PhotonNetwork.Instantiate(dronePath, spawnPos, Quaternion.identity, 0);
                         }
-                        finally
+                        catch
                         {
-                            if (started && staticGrab != null && donor != null && donor.physGrabber != null)
-                            {
-                                staticGrab.GrabEnded(donor.physGrabber);
-                            }
+                            droneObj = null;
                         }
 
-                        patientsVisited++;
-                        if (patient != null && patient.playerHealth != null)
+                        if (droneObj != null)
                         {
-                            observedTransferred += Mathf.Max(0, ResolveCurrentHealth(patient.playerHealth) - initialPatientHealth);
+                            spawnedDrones.Add(droneObj);
+                            patients.Add(patient);
+                            initialHealths.Add(cur);
                         }
+                    }
+
+                    if (spawnedDrones.Count == 0)
+                    {
+                        LastStatus = "无法生成治疗无人机，请确认当前场景支持该操作。";
+                        yield break;
+                    }
+
+                    yield return new WaitForSeconds(0.15f);
+
+                    for (int i = 0; i < spawnedDrones.Count; i++)
+                    {
+                        if (spawnedDrones[i] != null && patients[i] != null && patients[i].photonView != null)
+                        {
+                            ItemToggle toggle = spawnedDrones[i].GetComponent<ItemToggle>();
+                            if (toggle != null)
+                            {
+                                toggle.ToggleItem(true, patients[i].photonView.ViewID);
+                            }
+                        }
+                    }
+
+                    float timeout = 25f;
+                    while (timeout > 0f)
+                    {
+                        bool anyStillInjured = false;
+                        for (int i = 0; i < patients.Count; i++)
+                        {
+                            PlayerAvatar p = patients[i];
+                            if (p != null && !IsPlayerDead(p) && p.playerHealth != null &&
+                                ResolveCurrentHealth(p.playerHealth) < ResolveMaxHealth(p.playerHealth))
+                            {
+                                anyStillInjured = true;
+                                break;
+                            }
+                        }
+
+                        if (!anyStillInjured)
+                        {
+                            break;
+                        }
+
+                        yield return new WaitForSeconds(0.5f);
+                        timeout -= 0.5f;
                     }
                 }
                 finally
                 {
-                    // ApplyGodMode combines this temporary lock with the user's
-                    // configured setting, so the existing toggle is preserved.
+                    for (int i = 0; i < spawnedDrones.Count; i++)
+                    {
+                        if (spawnedDrones[i] != null)
+                        {
+                            PhotonView pv = spawnedDrones[i].GetComponent<PhotonView>();
+                            if (pv != null && pv.IsMine)
+                            {
+                                PhotonNetwork.Destroy(spawnedDrones[i]);
+                            }
+                        }
+                    }
+
+                    _healthSharingRoutine = null;
+
+                    int healedPlayers = 0;
+                    int totalHealed = 0;
+                    for (int i = 0; i < patients.Count; i++)
+                    {
+                        PlayerAvatar p = patients[i];
+                        if (p != null && p.playerHealth != null)
+                        {
+                            int delta = Mathf.Max(0, ResolveCurrentHealth(p.playerHealth) - initialHealths[i]);
+                            if (delta > 0)
+                            {
+                                healedPlayers++;
+                                totalHealed += delta;
+                            }
+                        }
+                    }
+
+                    LastStatus = totalHealed > 0
+                        ? $"已通过治疗无人机为 {healedPlayers} 名玩家恢复 {totalHealed} 点生命值。"
+                        : "治疗无人机已启动，若队友血量未变化请稍后重试。";
+                }
+            }
+
+            private IEnumerator ShareHealthRoutine(
+                PlayerAvatar donor,
+                List<PlayerAvatar> activePatients,
+                List<StaticGrabObject> activeGrabs,
+                List<int> initialHealths,
+                int skipped)
+            {
+                try
+                {
+                    float maxMissing = 0f;
+                    for (int i = 0; i < activePatients.Count; i++)
+                    {
+                        PlayerAvatar p = activePatients[i];
+                        if (p != null && p.playerHealth != null)
+                        {
+                            float missing = Mathf.Max(0, ResolveMaxHealth(p.playerHealth) - initialHealths[i]);
+                            if (missing > maxMissing) maxMissing = missing;
+                        }
+                    }
+
+                    float timeout = Mathf.Clamp(maxMissing / 8f + 4f, 12f, 300f);
+                    while (timeout > 0f && donor != null && donor.playerHealth != null && ResolveCurrentHealth(donor.playerHealth) > 10)
+                    {
+                        bool anyStillInjured = false;
+                        for (int i = 0; i < activePatients.Count; i++)
+                        {
+                            PlayerAvatar p = activePatients[i];
+                            if (p != null && !IsPlayerDead(p) && p.playerHealth != null &&
+                                ResolveCurrentHealth(p.playerHealth) < ResolveMaxHealth(p.playerHealth))
+                            {
+                                anyStillInjured = true;
+                            }
+                            else if (activeGrabs[i] != null && activeGrabs[i].grabbed && donor.physGrabber != null)
+                            {
+                                activeGrabs[i].GrabEnded(donor.physGrabber);
+                            }
+                        }
+
+                        if (!anyStillInjured)
+                        {
+                            break;
+                        }
+
+                        yield return new WaitForSeconds(0.5f);
+                        timeout -= 0.5f;
+                    }
+                }
+                finally
+                {
+                    for (int i = 0; i < activeGrabs.Count; i++)
+                    {
+                        if (activeGrabs[i] != null && donor != null && donor.physGrabber != null)
+                        {
+                            activeGrabs[i].GrabEnded(donor.physGrabber);
+                        }
+                    }
+
                     LocalPlayerManager.SetTemporaryHealthLock(false);
                     _healthSharingRoutine = null;
+
+                    int patientsHealed = 0;
+                    int observedTransferred = 0;
+                    for (int i = 0; i < activePatients.Count; i++)
+                    {
+                        PlayerAvatar p = activePatients[i];
+                        if (p != null && p.playerHealth != null)
+                        {
+                            int delta = Mathf.Max(0, ResolveCurrentHealth(p.playerHealth) - initialHealths[i]);
+                            if (delta > 0)
+                            {
+                                patientsHealed++;
+                                observedTransferred += delta;
+                            }
+                        }
+                    }
+
                     LastStatus = observedTransferred > 0
-                        ? $"已为 {patientsVisited} 名玩家恢复 {observedTransferred} 点生命值；你的生命值没有减少。"
+                        ? $"已为 {patientsHealed} 名玩家恢复 {observedTransferred} 点生命值；你的生命值没有减少。"
                         : skipped > 0
                             ? $"未能为目标加血；{skipped} 名玩家当前无法接受治疗。"
                             : "没有检测到生命值变化，请稍后重试。";
@@ -685,6 +885,18 @@ namespace Cheat.Features.Players
             return records;
         }
 
+        public static bool HealLocalPlayer()
+        {
+            PlayerAvatar localAvatar = ResolveOwnedLocalAvatar();
+            if (localAvatar == null)
+            {
+                LastStatus = "本地角色不存在，无法加血。";
+                return false;
+            }
+
+            return HealPlayer(localAvatar);
+        }
+
         public static bool HealPlayer(PlayerAvatar avatar)
         {
             if (avatar == null)
@@ -722,20 +934,27 @@ namespace Cheat.Features.Players
                 PlayerAdminNetHandler localHandler = GetLocalHandler();
                 if (localHandler == null || !localHandler.BeginHealthSharing(new List<PlayerAvatar> { avatar }))
                 {
-                    LastStatus = "无法开始加血，请松开手中物品后重试。";
+                    LastStatus = "无法开始加血，请稍后重试。";
                     return false;
                 }
 
-                LastStatus = $"正在为 `{ResolvePlayerName(avatar)}` 加血；你的生命值不会减少。";
+                LastStatus = $"正在通过医疗包/输血逻辑为 `{ResolvePlayerName(avatar)}` 加血。";
                 return true;
             }
 
             try
             {
-                playerHealth.HealOther(missingHealth, effect: true);
+                if (isLocalOwner)
+                {
+                    playerHealth.Heal(missingHealth, effect: true);
+                }
+                else
+                {
+                    playerHealth.HealOther(missingHealth, effect: true);
+                }
                 LastStatus = isAuthority && !isLocalOwner
                     ? $"已为 `{ResolvePlayerName(avatar)}` 补满生命值。"
-                    : $"已为 `{ResolvePlayerName(avatar)}` 补充生命值。";
+                    : $"已为 `{ResolvePlayerName(avatar)}` 补满生命值。";
                 return true;
             }
             catch (Exception)
@@ -843,32 +1062,46 @@ namespace Cheat.Features.Players
             bool isAuthority = SemiFunc.IsMasterClientOrSingleplayer();
             if (GameManager.Multiplayer() && !isAuthority)
             {
+                PlayerAvatar localAvatar = ResolveOwnedLocalAvatar();
+                bool healedLocal = false;
+                if (localAvatar != null && !IsPlayerDead(localAvatar) && localAvatar.playerHealth != null)
+                {
+                    int localMissing = Mathf.Max(0, ResolveMaxHealth(localAvatar.playerHealth) - ResolveCurrentHealth(localAvatar.playerHealth));
+                    if (localMissing > 0)
+                    {
+                        localAvatar.playerHealth.Heal(localMissing, effect: true);
+                        healedLocal = true;
+                    }
+                }
+
                 List<PlayerAvatar> patients = new List<PlayerAvatar>();
                 for (int i = 0; i < onlinePlayers.Count; i++)
                 {
                     PlayerAvatar avatar = onlinePlayers[i].Avatar;
-                    if (avatar != null && avatar != ResolveOwnedLocalAvatar() && !IsPlayerDead(avatar) &&
+                    if (avatar != null && avatar != localAvatar && !IsPlayerDead(avatar) &&
                         avatar.playerHealth != null && ResolveCurrentHealth(avatar.playerHealth) < ResolveMaxHealth(avatar.playerHealth))
                     {
                         patients.Add(avatar);
                     }
                 }
 
-                PlayerAdminNetHandler localHandler = GetLocalHandler();
                 if (patients.Count == 0)
                 {
-                    LastStatus = "没有需要接收生命值的远端存活玩家。";
-                    return 0;
+                    LastStatus = healedLocal ? "已为自己补满生命值；没有其他需要加血的存活队友。" : "当前没有需要加血的存活玩家。";
+                    return healedLocal ? 1 : 0;
                 }
 
+                PlayerAdminNetHandler localHandler = GetLocalHandler();
                 if (localHandler == null || !localHandler.BeginHealthSharing(patients))
                 {
-                    LastStatus = "无法开始加血，请稍后重试。";
-                    return 0;
+                    LastStatus = healedLocal ? "已为自己补满生命值，但无法为队友开始加血，请稍后重试。" : "无法开始加血，请稍后重试。";
+                    return healedLocal ? 1 : 0;
                 }
 
-                LastStatus = $"正在依次为 {patients.Count} 名受伤队友加血；每秒最多增加 10 点，你的生命值不会减少。";
-                return patients.Count;
+                LastStatus = healedLocal
+                    ? $"已为自己补满生命值，正在为 {patients.Count} 名受伤队友加血。"
+                    : $"正在依次为 {patients.Count} 名受伤队友加血。";
+                return patients.Count + (healedLocal ? 1 : 0);
             }
 
             int requestCount = 0;

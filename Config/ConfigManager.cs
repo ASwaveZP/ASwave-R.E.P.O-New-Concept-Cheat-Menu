@@ -23,7 +23,7 @@ public static class ConfigManager
 	private const string LegacyConfigFileExtension = ".json";
 
 	private const int ConfigMagic = 1381259348;
-	private const int ConfigVersion = 21;
+	private const int ConfigVersion = 22;
 
 	private const int TextConfigVersion = 8;
 
@@ -1554,6 +1554,7 @@ public static class ConfigManager
 	{
 		writer.Write(settings.Stamina);
 		writer.Write(settings.Health);
+		writer.Write(settings.ExtraJump);
 		writer.Write(settings.TumbleWings);
 		writer.Write(settings.CrouchRest);
 		writer.Write(settings.DeathHeadBattery);
@@ -1571,6 +1572,10 @@ public static class ConfigManager
 			{
 				settings.Stamina = reader.ReadInt32();
 				settings.Health = reader.ReadInt32();
+				if (version >= 22)
+				{
+					settings.ExtraJump = reader.ReadInt32();
+				}
 				settings.TumbleWings = reader.ReadInt32();
 				settings.CrouchRest = reader.ReadInt32();
 				settings.DeathHeadBattery = reader.ReadInt32();

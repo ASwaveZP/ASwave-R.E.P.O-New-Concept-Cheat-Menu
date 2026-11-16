@@ -2555,6 +2555,7 @@ namespace Cheat
         private void DrawPlayerPage(ConfigData config, ref bool configChanged)
         {
             BeginPanel("本地角色快捷功能", "快速调整角色状态与移动方式。");
+            GUILayout.BeginHorizontal(Array.Empty<GUILayoutOption>());
             if (DrawActionButton("复活自己"))
             {
                 PlayerAvatar localAvatar = PlayerController.instance?.playerAvatarScript;
@@ -2563,6 +2564,11 @@ namespace Cheat
                     PlayerAdminManager.RevivePlayer(localAvatar);
                 }
             }
+            if (DrawActionButton("一键为自己加血"))
+            {
+                PlayerAdminManager.HealLocalPlayer();
+            }
+            GUILayout.EndHorizontal();
             GUILayout.EndVertical();
 
             BeginPanel("全局设置", "调整会影响整局游戏的选项。");
@@ -2782,6 +2788,7 @@ namespace Cheat
 
             float stamina = config.Skills.Stamina;
             float health = config.Skills.Health;
+            float extraJump = config.Skills.ExtraJump;
             float tumbleWings = config.Skills.TumbleWings;
             float crouchRest = config.Skills.CrouchRest;
             float deathHeadBattery = config.Skills.DeathHeadBattery;
@@ -2793,6 +2800,7 @@ namespace Cheat
             bool localChanged = false;
             localChanged |= DrawSliderField("体力上限", ref stamina, 0f, 99f, "级", "F0");
             localChanged |= DrawSliderField("生命上限", ref health, 0f, 99f, "级", "F0");
+            localChanged |= DrawSliderField("跳跃次数", ref extraJump, 0f, 99f, "级", "F0");
             localChanged |= DrawSliderField("滑翔翅膀", ref tumbleWings, 0f, 99f, "级", "F0");
             localChanged |= DrawSliderField("蹲下休息", ref crouchRest, 0f, 99f, "级", "F0");
             localChanged |= DrawSliderField("复活电池", ref deathHeadBattery, 0f, 99f, "级", "F0");
@@ -2805,6 +2813,7 @@ namespace Cheat
             {
                 config.Skills.Stamina = Mathf.RoundToInt(stamina);
                 config.Skills.Health = Mathf.RoundToInt(health);
+                config.Skills.ExtraJump = Mathf.RoundToInt(extraJump);
                 config.Skills.TumbleWings = Mathf.RoundToInt(tumbleWings);
                 config.Skills.CrouchRest = Mathf.RoundToInt(crouchRest);
                 config.Skills.DeathHeadBattery = Mathf.RoundToInt(deathHeadBattery);
@@ -3614,6 +3623,43 @@ namespace Cheat
 
             BeginPanel("物品操作", "移动有价值物品和门，也可开启物品保护或返回货车。");
             configChanged |= ToggleConfig(ref config.Loot.ItemInvulnerable, ref config.Loot.ItemInvulnerableKey, "物品无敌");
+            GUILayout.Label("筛选传送分类:", _hintStyle);
+            GUILayout.BeginHorizontal(Array.Empty<GUILayoutOption>());
+            LootTeleporter.FilterValuables = GUILayout.Toggle(LootTeleporter.FilterValuables, " 贵重物品");
+            LootTeleporter.FilterBeads = GUILayout.Toggle(LootTeleporter.FilterBeads, " 滚动珠子");
+            LootTeleporter.FilterWeapons = GUILayout.Toggle(LootTeleporter.FilterWeapons, " 武器装备");
+            LootTeleporter.FilterUpgrades = GUILayout.Toggle(LootTeleporter.FilterUpgrades, " 升级药水");
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal(Array.Empty<GUILayoutOption>());
+            LootTeleporter.FilterHealthPacks = GUILayout.Toggle(LootTeleporter.FilterHealthPacks, " 加血包");
+            LootTeleporter.FilterBatteries = GUILayout.Toggle(LootTeleporter.FilterBatteries, " 电池能量");
+            LootTeleporter.FilterMoneyBags = GUILayout.Toggle(LootTeleporter.FilterMoneyBags, " 钱袋子");
+            LootTeleporter.ExcludeSecuredItems = GUILayout.Toggle(LootTeleporter.ExcludeSecuredItems, " 排除安全区物品");
+            GUILayout.EndHorizontal();
+            if (LootTeleporter.IsPulling)
+            {
+                if (DrawActionButton("取消当前传送"))
+                {
+                    LootTeleporter.CancelPull();
+                }
+            }
+            else
+            {
+                GUILayout.BeginHorizontal(Array.Empty<GUILayoutOption>());
+                if (DrawActionButton("传送筛选物品到面前"))
+                {
+                    LootTeleporter.TeleportFilteredItems(LootTeleporter.BatchDestination.Front);
+                }
+                if (DrawActionButton("传送到推车"))
+                {
+                    LootTeleporter.TeleportFilteredItems(LootTeleporter.BatchDestination.Cart);
+                }
+                if (DrawActionButton("传送到提取点"))
+                {
+                    LootTeleporter.TeleportFilteredItems(LootTeleporter.BatchDestination.Extraction);
+                }
+                GUILayout.EndHorizontal();
+            }
             if (DrawActionButton("传送所有有价值物品到指向地面"))
             {
                 LootTeleporter.TeleportValuablesToPlayer();
@@ -3639,6 +3685,28 @@ namespace Cheat
             if (!string.IsNullOrEmpty(LootTeleporter.LastStatus))
             {
                 GUILayout.Label(LootTeleporter.LastStatus, _hintStyle);
+            }
+            GUILayout.EndVertical();
+
+            BeginPanel("关卡提取点传送", "一键传送至当前关卡中的任意撤离/提取点。");
+            var extractionPoints = LootTeleporter.GetSortedExtractionPoints();
+            if (extractionPoints.Count == 0)
+            {
+                GUILayout.Label("当前没有可用的关卡提取点。", _hintStyle);
+            }
+            else
+            {
+                GUILayout.BeginHorizontal(Array.Empty<GUILayoutOption>());
+                for (int epIdx = 0; epIdx < extractionPoints.Count; epIdx++)
+                {
+                    ExtractionPoint ep = extractionPoints[epIdx];
+                    if (DrawActionButton($"提取点 {epIdx + 1}"))
+                    {
+                        Vector3 epDest = ep.transform.position + Vector3.up * 0.6f;
+                        LocalPlayerManager.TeleportLocalPlayer(epDest, Quaternion.identity, $"已传送至提取点 {epIdx + 1}。");
+                    }
+                }
+                GUILayout.EndHorizontal();
             }
             GUILayout.EndVertical();
 
