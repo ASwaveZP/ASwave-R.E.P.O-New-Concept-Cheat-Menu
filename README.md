@@ -1,6 +1,4 @@
-# REPO Cheat Menu By ASwave
-
-**Version: V3.32.36**
+# REPO Cheat Menu
 
 This is a C# game mod for R.E.P.O. It targets the Unity Mono runtime and .NET Framework 4.8. The source is built against the game’s managed assemblies, which are not included in this repository.
 
@@ -29,20 +27,14 @@ The build compiles and embeds the updater, including its Mono injection code, in
 - `Features/` — game features and visual displays
 - `Config/` — settings and configuration persistence
 - `UI/`, `AuxMenu/`, `Render/` — menu and rendering code
-- `Utils/` — shared helpers and version information
+- `Utils/` — shared helpers
 - `REPO.Cheat.csproj` — project references and build settings
 
 The repository excludes local dependencies, extracted game assets, temporary files, and build output.
 
-## Version
-
-The menu and assembly version is `3.32.36`. The release notes are in [CHANGELOG.md](CHANGELOG.md).
-
 ---
 
-# REPO Cheat Menu By ASwave (简体中文)
-
-**版本：V3.32.36**
+# REPO Cheat Menu（简体中文）
 
 这是一个为 R.E.P.O. 编写的 C# 游戏模组，运行于 Unity Mono，目标框架为 .NET Framework 4.8。项目依赖游戏目录中的托管程序集；受游戏版权限制，仓库不包含这些 DLL。
 
@@ -71,9 +63,9 @@ The menu and assembly version is `3.32.36`. The release notes are in [CHANGELOG.
 - `Features/`：游戏功能与画面显示
 - `Config/`：设置与配置保存
 - `UI/`、`AuxMenu/`、`Render/`：菜单与绘制代码
-- `Utils/`：通用工具和版本信息
+- `Utils/`：通用工具
 - `REPO.Cheat.csproj`：项目引用与构建设置
 
 仓库不包含本地依赖、解包游戏资产、临时文件和构建产物。
 
-版本为 `3.32.36`，更新内容见 [CHANGELOG.md](CHANGELOG.md)。
+
