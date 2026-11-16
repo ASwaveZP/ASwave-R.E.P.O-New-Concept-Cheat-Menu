@@ -1,40 +1,6 @@
 # REPO Cheat Menu
 
-This is a C# game mod for R.E.P.O. It targets the Unity Mono runtime and .NET Framework 4.8. The source is built against the game’s managed assemblies, which are not included in this repository.
-
-## Build
-
-Use Windows with the .NET 10 SDK and .NET Framework 4.8 Developer Pack installed.
-
-1. In the game installation, open `REPO_Data/Managed/`.
-2. Copy its managed DLL files into this project’s `Libs/Managed/` directory. Create the directory if needed. The game assemblies are not redistributed here.
-3. From this project directory, run:
-
-   ```powershell
-   dotnet build REPO.Cheat.csproj -c Release
-   ```
-
-   Or run `build.bat`.
-
-The build output is `bin/Release/net48/REPO New Cheat.dll`.
-
-This project also supports [SmartCheatLoader](https://github.com/2786256218/SmartCheatLoader), which can automatically download and inject the mod. You do not need to download the DLL manually or configure launch parameters.
-
-The build compiles and embeds the updater, including its Mono injection code, in the mod DLL. Version checks only query GitHub. When you choose **Update**, the mod downloads the new DLL and extracts a temporary updater EXE. An elevated bootstrap hands the update to a one-time Windows Task Scheduler worker, so the update countdown and file replacement run independently of the game process. After the game exits, the worker waits for Steam's session state to clear (with an optional skip), replaces the DLL at its current injection path, waits five seconds, then starts Steam App ID `3241660` and injects the updated DLL. Timeouts and completed updates clean the updater's temporary directory. Each GitHub release only needs the mod DLL. If a release asset includes a GitHub SHA-256 digest, the menu verifies it before starting the updater. The injector source and its MIT license notice are in `UpdateHelper/`.
-
-## Source layout
-
-- `Features/` — game features and visual displays
-- `Config/` — settings and configuration persistence
-- `UI/`, `AuxMenu/`, `Render/` — menu and rendering code
-- `Utils/` — shared helpers
-- `REPO.Cheat.csproj` — project references and build settings
-
-The repository excludes local dependencies, extracted game assets, temporary files, and build output.
-
----
-
-# REPO Cheat Menu（简体中文）
+**支持 SmartCheatLoader：** 可在 [SmartCheatLoader](https://github.com/2786256218/SmartCheatLoader) 中自动下载并注入本模组，无需手动下载 DLL 或配置启动参数。
 
 这是一个为 R.E.P.O. 编写的 C# 游戏模组，运行于 Unity Mono，目标框架为 .NET Framework 4.8。项目依赖游戏目录中的托管程序集；受游戏版权限制，仓库不包含这些 DLL。
 
@@ -54,8 +20,6 @@ The repository excludes local dependencies, extracted game assets, temporary fil
 
 构建产物位于 `bin/Release/net48/REPO New Cheat.dll`。
 
-本项目也支持 [SmartCheatLoader](https://github.com/2786256218/SmartCheatLoader)，可由它自动下载并注入模组，无需手动下载 DLL 或配置启动参数。
-
 构建时会将包含 Mono 注入代码的更新程序编译并嵌入模组 DLL。检查更新只查询 GitHub；选择“更新”后才会下载文件并释放临时更新程序。提权启动的引导程序会把更新交给 Windows 任务计划程序启动的独立进程，因此倒计时和替换流程不依赖游戏进程。游戏退出后，更新程序等待 Steam 清理游戏状态（可选择跳过倒计时），再替换原注入路径上的 DLL；替换完成后等待 5 秒，通过 Steam App ID `3241660` 启动游戏并注入新 DLL。超时或更新完成后会清理更新器的临时目录。GitHub Release 只需发布模组 DLL，无需额外发布加载器。GitHub 发布信息包含 SHA-256 摘要时，菜单会在启动更新前校验文件。注入代码来源及 MIT 许可说明见 `UpdateHelper/`。
 
 ## 源码目录
@@ -68,4 +32,39 @@ The repository excludes local dependencies, extracted game assets, temporary fil
 
 仓库不包含本地依赖、解包游戏资产、临时文件和构建产物。
 
+---
+
+# English
+
+**SmartCheatLoader support:** You can use [SmartCheatLoader](https://github.com/2786256218/SmartCheatLoader) to download and inject this mod automatically. No manual DLL download or launch parameter setup is needed.
+
+This is a C# game mod for R.E.P.O. It targets the Unity Mono runtime and .NET Framework 4.8. The source is built against the game’s managed assemblies, which are not included in this repository.
+
+## Build
+
+Use Windows with the .NET 10 SDK and .NET Framework 4.8 Developer Pack installed.
+
+1. In the game installation, open `REPO_Data/Managed/`.
+2. Copy its managed DLL files into this project’s `Libs/Managed/` directory. Create the directory if needed. The game assemblies are not redistributed here.
+3. From this project directory, run:
+
+   ```powershell
+   dotnet build REPO.Cheat.csproj -c Release
+   ```
+
+   Or run `build.bat`.
+
+The build output is `bin/Release/net48/REPO New Cheat.dll`.
+
+The build compiles and embeds the updater, including its Mono injection code, in the mod DLL. Version checks only query GitHub. When you choose **Update**, the mod downloads the new DLL and extracts a temporary updater EXE. An elevated bootstrap hands the update to a one-time Windows Task Scheduler worker, so the update countdown and file replacement run independently of the game process. After the game exits, the worker waits for Steam's session state to clear (with an optional skip), replaces the DLL at its current injection path, waits five seconds, then starts Steam App ID `3241660` and injects the updated DLL. Timeouts and completed updates clean the updater's temporary directory. Each GitHub release only needs the mod DLL. If a release asset includes a GitHub SHA-256 digest, the menu verifies it before starting the updater. The injector source and its MIT license notice are in `UpdateHelper/`.
+
+## Source layout
+
+- `Features/` — game features and visual displays
+- `Config/` — settings and configuration persistence
+- `UI/`, `AuxMenu/`, `Render/` — menu and rendering code
+- `Utils/` — shared helpers
+- `REPO.Cheat.csproj` — project references and build settings
+
+The repository excludes local dependencies, extracted game assets, temporary files, and build output.
 
