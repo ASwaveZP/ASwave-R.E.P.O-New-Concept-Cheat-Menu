@@ -1,6 +1,6 @@
 # REPO Cheat Menu
 
-**支持 SmartCheatLoader：** 可在 [SmartCheatLoader](https://github.com/2786256218/SmartCheatLoader) 中自动下载并注入本模组，无需手动下载 DLL 或配置启动参数。
+**支持 SmartCheatLoader：** 可在 [SmartCheatLoader](https://github.com/ASwaveZP/SmartCheatLoader) 中自动下载并注入本模组，无需手动下载 DLL 或配置启动参数。
 
 这是一个为 R.E.P.O. 编写的 C# 游戏模组，运行于 Unity Mono，目标框架为 .NET Framework 4.8。项目依赖游戏目录中的托管程序集；受游戏版权限制，仓库不包含这些 DLL。
 
@@ -36,7 +36,7 @@
 
 # English
 
-**SmartCheatLoader support:** You can use [SmartCheatLoader](https://github.com/2786256218/SmartCheatLoader) to download and inject this mod automatically. No manual DLL download or launch parameter setup is needed.
+**SmartCheatLoader support:** You can use [SmartCheatLoader](https://github.com/ASwaveZP/SmartCheatLoader) to download and inject this mod automatically. No manual DLL download or launch parameter setup is needed.
 
 This is a C# game mod for R.E.P.O. It targets the Unity Mono runtime and .NET Framework 4.8. The source is built against the game’s managed assemblies, which are not included in this repository.
 
